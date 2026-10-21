@@ -1,11 +1,16 @@
+import math
+from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
+from gymnasium.vector import VectorEnv
 
-from crafter_jepa.modules import ActorCritic, CNNEncoder
+from crafter_jepa.modules import ActorCritic, ImpalaEncoder
 from crafter_jepa.utils.logger import log_metrics
 from crafter_jepa.utils.rollout_buffer import RolloutBuffer
+from crafter_jepa.utils.schedule import LinearSchedule
 
 OBS_SHAPE = (3, 64, 64)
 
@@ -18,6 +23,7 @@ class PPOTrainer:
         hidden_dim: int,
         dropout: float,
         *,
+        device: str = "cpu",
         n_steps: int = 2048,
         n_iterations: int = 500,
         batch_size: int = 64,
@@ -28,11 +34,17 @@ class PPOTrainer:
         epsilon: float = 0.2,
         vf_coef: float = 0.5,
         ent_coef: float = 0.01,
+        ent_coef_final: float = 0.005,
+        ent_decay_steps: int = 5_000_000,
         max_norm: float = 0.5,
+        checkpoint_dir: str = "checkpoints",
+        checkpoint_every: int = 50,
     ) -> None:
-        self.encoder = CNNEncoder(feature_dim)
-        self.actor_critic = ActorCritic(feature_dim, action_dim, hidden_dim, dropout)
-        self.device = next(self.actor_critic.parameters()).device
+        self.device = self._resolve_device(device)
+        self.encoder = ImpalaEncoder(feature_dim).to(self.device)
+        self.actor_critic = ActorCritic(
+            feature_dim, action_dim, hidden_dim, dropout
+        ).to(self.device)
         self.n_steps = n_steps
         self.n_iterations = n_iterations
         self.batch_size = batch_size
@@ -42,13 +54,26 @@ class PPOTrainer:
         self.lam = lam
         self.epsilon = epsilon
         self.vf_coef = vf_coef
-        self.ent_coef = ent_coef
+        self.ent_schedule = LinearSchedule(ent_coef, ent_coef_final, ent_decay_steps)
         self.max_norm = max_norm
-        self._episode_return = 0.0
+        self.checkpoint_dir = Path(checkpoint_dir)
+        self.checkpoint_every = checkpoint_every
+        self._episode_return = np.zeros(0)
+
+    @staticmethod
+    def _resolve_device(name: str) -> torch.device:
+        if name not in ("cpu", "cuda"):
+            raise ValueError(f"device must be 'cpu' or 'cuda', got {name!r}")
+        if name == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "device 'cuda' requested but CUDA is unavailable; "
+                "set trainer.device: cpu in the config"
+            )
+        return torch.device(name)
 
     def _to_tensor(self, obs: np.ndarray) -> torch.Tensor:
-        pixels = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        return pixels.permute(2, 0, 1) / 255.0
+        pixels = torch.as_tensor(obs, device=self.device)
+        return pixels.permute(0, 3, 1, 2)
 
     def _parameters(self) -> list[torch.nn.Parameter]:
         return [*self.encoder.parameters(), *self.actor_critic.parameters()]
@@ -79,44 +104,119 @@ class PPOTrainer:
 
         return advantages, advantages + values
 
+    def _real_next_obs(
+        self, obs: np.ndarray, done: np.ndarray, info: dict[str, Any]
+    ) -> torch.Tensor:
+        # SAME_STEP autoreset: obs of a finished env is already the next episode's
+        # first frame; the true successor is in info["final_obs"]
+        next_obs = obs.copy()
+        for i in np.flatnonzero(done):
+            next_obs[i] = info["final_obs"][i]
+        return self._to_tensor(next_obs)
+
+    @torch.no_grad()
+    def _truncation_bonus(
+        self, truncated: np.ndarray, info: dict[str, Any]
+    ) -> torch.Tensor:
+        # time-limit ends are not real terminals: bootstrap from the last obs
+        bonus = torch.zeros(len(truncated), device=self.device)
+        idx = np.flatnonzero(truncated)
+        if len(idx) == 0:
+            return bonus
+        final_obs = np.stack([info["final_obs"][i] for i in idx])
+        features = self.encoder(self._to_tensor(final_obs).float() / 255)
+        bonus[idx] = self.gamma * self.actor_critic.get_value(features)
+        return bonus
+
     @torch.no_grad()
     def _collect_rollout(
-        self, env: Any, obs: np.ndarray, buffer: RolloutBuffer
-    ) -> tuple[np.ndarray, torch.Tensor, list[float]]:
+        self, env: VectorEnv, obs: np.ndarray, buffer: RolloutBuffer
+    ) -> tuple[np.ndarray, torch.Tensor, list[float], list[dict[str, int]]]:
         episode_returns: list[float] = []
+        episode_achievements: list[dict[str, int]] = []
         self.encoder.eval()
         self.actor_critic.eval()
 
         for _ in range(self.n_steps):
             obs_t = self._to_tensor(obs)
-            features = self.encoder(obs_t.unsqueeze(0))
+            features = self.encoder(obs_t.float() / 255)
             action, log_prob, _, value = self.actor_critic.get_action_and_value(
                 features
             )
-            action, log_prob, value = action[0], log_prob[0], value[0]
-            next_obs, reward, done, _ = env.step(action.item())
+            obs, reward, terminated, truncated, info = env.step(action.cpu().numpy())
+            done = terminated | truncated
+            reward_t = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+            reward_t += self._truncation_bonus(truncated & ~terminated, info)
 
-            buffer.add(obs_t, action, log_prob, value, reward, done)
+            buffer.add(
+                obs_t,
+                self._real_next_obs(obs, done, info),
+                action,
+                log_prob,
+                value,
+                reward_t,
+                torch.as_tensor(done, dtype=torch.float32, device=self.device),
+            )
 
             self._episode_return += reward
-            if done:
-                episode_returns.append(self._episode_return)
-                self._episode_return = 0.0
+            for i in np.flatnonzero(done):
+                episode_returns.append(float(self._episode_return[i]))
+                self._episode_return[i] = 0.0
+                episode_achievements.append(
+                    {
+                        k: int(v[i])
+                        for k, v in info["final_info"]["achievements"].items()
+                        if not k.startswith("_")
+                    }
+                )
 
-            obs = env.reset() if done else next_obs
+        features = self.encoder(self._to_tensor(obs).float() / 255)
+        last_value = self.actor_critic.get_value(features)
+        return obs, last_value, episode_returns, episode_achievements
 
-        features = self.encoder(self._to_tensor(obs).unsqueeze(0))
-        last_value = self.actor_critic.get_value(features)[0]
-        return obs, last_value, episode_returns
+    @staticmethod
+    def _achievement_metrics(episodes: list[dict[str, int]]) -> dict[str, float]:
+        if not episodes:
+            return {}
+        rates = {
+            name: sum(ep[name] > 0 for ep in episodes) / len(episodes)
+            for name in episodes[0]
+        }
+        # Crafter score: geometric mean of (1 + success% ) minus 1, in percent
+        log_mean = sum(math.log(1 + 100 * r) for r in rates.values()) / len(rates)
+        return {
+            **{f"achievement/{name}": rate for name, rate in rates.items()},
+            "crafter_score": math.exp(log_mean) - 1,
+        }
+
+    def _extra_loss(
+        self, batch: dict[str, torch.Tensor], features: torch.Tensor
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        return features.new_zeros(()), {}
+
+    def _after_step(self) -> None:
+        pass
+
+    def _checkpoint_state(self) -> dict[str, Any]:
+        return {
+            "encoder": self.encoder.state_dict(),
+            "actor_critic": self.actor_critic.state_dict(),
+        }
+
+    def _save_checkpoint(self, iteration: int) -> None:
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        state = {"iteration": iteration, **self._checkpoint_state()}
+        tmp = self.checkpoint_dir / "last.pt.tmp"
+        torch.save(state, tmp)
+        tmp.replace(self.checkpoint_dir / "last.pt")
 
     def _update(
-        self, buffer: RolloutBuffer, optimizer: torch.optim.Optimizer
+        self,
+        buffer: RolloutBuffer,
+        optimizer: torch.optim.Optimizer,
+        ent_coef: float,
     ) -> dict[str, float]:
-        stats: dict[str, list[float]] = {
-            "policy_loss": [],
-            "value_loss": [],
-            "entropy": [],
-        }
+        stats: defaultdict[str, list[float]] = defaultdict(list)
         self.encoder.train()
         self.actor_critic.train()
 
@@ -139,31 +239,39 @@ class PPOTrainer:
                 ).mean()
                 value_loss = ((value - batch["returns"]) ** 2).mean()
                 entropy_bonus = entropy.mean()
+                extra_loss, extra_stats = self._extra_loss(batch, features)
 
                 total_loss = (
                     policy_loss
                     + self.vf_coef * value_loss
-                    - self.ent_coef * entropy_bonus
+                    - ent_coef * entropy_bonus
+                    + extra_loss
                 )
 
                 optimizer.zero_grad()
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self._parameters(), self.max_norm)
                 optimizer.step()
+                self._after_step()
 
                 stats["policy_loss"].append(policy_loss.item())
                 stats["value_loss"].append(value_loss.item())
                 stats["entropy"].append(entropy_bonus.item())
+                for name, value_ in extra_stats.items():
+                    stats[name].append(value_)
 
         return {name: sum(vals) / len(vals) for name, vals in stats.items()}
 
-    def train(self, env: Any) -> None:
+    def train(self, env: VectorEnv, n_envs: int) -> None:
+        self._episode_return = np.zeros(n_envs)
         optimizer = torch.optim.AdamW(self._parameters(), lr=self.lr)
-        buffer = RolloutBuffer(self.n_steps, OBS_SHAPE, self.device)
-        obs = env.reset()
+        buffer = RolloutBuffer(self.n_steps, n_envs, OBS_SHAPE, self.device)
+        obs, _ = env.reset()
 
         for iteration in range(1, self.n_iterations + 1):
-            obs, last_value, episode_returns = self._collect_rollout(env, obs, buffer)
+            obs, last_value, episode_returns, achievements = self._collect_rollout(
+                env, obs, buffer
+            )
 
             buffer.advantages, buffer.returns = self._advantage_estimation(
                 buffer.rewards,
@@ -174,8 +282,14 @@ class PPOTrainer:
                 self.lam,
             )
 
-            metrics = self._update(buffer, optimizer)
+            env_steps = (iteration - 1) * self.n_steps * n_envs
+            ent_coef = self.ent_schedule(env_steps)
+            metrics = self._update(buffer, optimizer, ent_coef)
+            metrics["ent_coef"] = ent_coef
             if episode_returns:
                 metrics["episode_return"] = sum(episode_returns) / len(episode_returns)
-            log_metrics(iteration * self.n_steps, metrics)
+            metrics.update(self._achievement_metrics(achievements))
+            log_metrics(iteration * self.n_steps * n_envs, metrics)
             buffer.reset()
+            if iteration % self.checkpoint_every == 0 or iteration == self.n_iterations:
+                self._save_checkpoint(iteration)

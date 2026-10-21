@@ -1,7 +1,7 @@
 [project]
-name = "crafter-jepa"
+name = "latent-rl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Latent-space ablation for PPO on Crafter: IMPALA encoder vs JEPA vs VAE vs SAE"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

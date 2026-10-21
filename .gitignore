@@ -8,3 +8,7 @@ __pycache__/
 wandb/
 checkpoints/
 *.pt
+
+
+# md files
+todo.md
