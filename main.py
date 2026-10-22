@@ -8,10 +8,15 @@ import yaml
 from crafter_jepa.envs.crafter_env import make_vec_env
 from crafter_jepa.trainers.jepa_trainer import JEPATrainer
 from crafter_jepa.trainers.ppo_trainer import PPOTrainer
+from crafter_jepa.trainers.vae_trainer import VAETrainer
 from crafter_jepa.utils.logger import finish_wandb, init_wandb, setup_logging
 
-CONFIG_DIR = Path(__file__).parent / "config"
-ALGORITHMS: dict[str, type[PPOTrainer]] = {"ppo": PPOTrainer, "jepa": JEPATrainer}
+CONFIG_DIR = Path(__file__).parent / "crafter_jepa" / "config"
+ALGORITHMS: dict[str, type[PPOTrainer]] = {
+    "ppo": PPOTrainer,
+    "jepa": JEPATrainer,
+    "vae": VAETrainer,
+}
 
 
 def load_config(path: Path) -> dict[str, Any]:

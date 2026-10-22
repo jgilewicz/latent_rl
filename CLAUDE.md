@@ -4,12 +4,16 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
 
 ## Structure
 
-- `main.py` — `--algo`, `--seed` → `config/<algo>_config.yaml`; builds vec env, trainer; checkpoint dir gets `/seed<seed>`
+- `main.py` — `--algo`, `--seed` → `crafter_jepa/config/<algo>_config.yaml`; builds vec env, trainer; checkpoint dir gets `/seed<seed>`
+- `crafter_jepa/config/` — `ppo_config.yaml`, `jepa_config.yaml`, `vae_config.yaml`, `predictor_config.yaml`
 - `crafter_jepa/envs/crafter_env.py` — `CrafterGymEnv`, `make_vec_env`
-- `crafter_jepa/modules/` — `ImpalaEncoder` (IMPALA ResNet 16-32-32 + MLP + LayerNorm), `ActorCritic`, `JEPA`
+- `crafter_jepa/modules/` — `ImpalaEncoder`, `ImpalaDecoder`, `ActorCritic`, `JEPA`, `VAE`, `ObservationPredictor`
 - `crafter_jepa/trainers/ppo_trainer.py` — `PPOTrainer` (hooks `_extra_loss`, `_after_step`)
-- `crafter_jepa/trainers/jepa_trainer.py` — `JEPATrainer(PPOTrainer)`; config `config/jepa_config.yaml` (`jepa_coef`, `ema_tau`, `var_coef`)
-- `crafter_jepa/utils/` — `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay)
+- `crafter_jepa/trainers/jepa_trainer.py` — `JEPATrainer(PPOTrainer)`; config `crafter_jepa/config/jepa_config.yaml` (`jepa_coef`, `ema_tau`, `var_coef`)
+- `crafter_jepa/trainers/vae_trainer.py` — `VAETrainer(PPOTrainer)`; config `crafter_jepa/config/vae_config.yaml` (`recon_coef`, `kl_coef`)
+- `crafter_jepa/scripts/train_predictor.py` — trains `ObservationPredictor` on frozen policy checkpoint (configured via YAML)
+- `crafter_jepa/scripts/visualize_rollout.py` — multi-step rollout imagination $o_{t+1}, o_{t+2}, \dots$ from latent state, outputs comparison grid and GIF
+- `crafter_jepa/utils/` — `RolloutBuffer`, `log_metrics`, `LinearSchedule`, `visualization` (`save_rollout_grid`, `save_rollout_gif`)
 
 ## Conventions
 
