@@ -22,7 +22,3 @@ training:
   recon_loss_coef: 1.0
   pred_obs_loss_coef: 1.0
   save_every: 25
-
-evaluation:
-  visualize_every: 25
-  visualize_horizon: 8

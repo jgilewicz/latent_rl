@@ -50,4 +50,4 @@ class JEPA(nn.Module):
         with torch.no_grad():
             y = self.target(next_obs)
 
-        return ((pred - y) ** 2).mean()
+        return F.mse_loss(pred, y)

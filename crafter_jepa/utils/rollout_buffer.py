@@ -10,6 +10,7 @@ class RolloutBuffer:
         n_envs: int,
         obs_shape: tuple[int, ...],
         device: torch.device,
+        n_labels: int = 0,
     ) -> None:
         self.n_steps = n_steps
         self.n_envs = n_envs
@@ -25,6 +26,7 @@ class RolloutBuffer:
         self.dones = torch.zeros(n_steps, n_envs, device=device)
         self.advantages = torch.zeros(n_steps, n_envs, device=device)
         self.returns = torch.zeros(n_steps, n_envs, device=device)
+        self.labels = torch.zeros(n_steps, n_envs, n_labels, device=device)
         self.pos = 0
 
     def add(
@@ -36,6 +38,7 @@ class RolloutBuffer:
         value: torch.Tensor,
         reward: torch.Tensor,
         done: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> None:
         if self.pos >= self.n_steps:
             raise RuntimeError(
@@ -48,6 +51,8 @@ class RolloutBuffer:
         self.values[self.pos] = value
         self.rewards[self.pos] = reward
         self.dones[self.pos] = done
+        if labels is not None:
+            self.labels[self.pos] = labels
         self.pos += 1
 
     def reset(self) -> None:

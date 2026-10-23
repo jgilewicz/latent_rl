@@ -5,14 +5,12 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 import yaml
 
 from crafter_jepa.envs.crafter_env import make_vec_env
 from crafter_jepa.modules import ActorCritic, ImpalaEncoder, ObservationPredictor
 from crafter_jepa.utils.logger import setup_logging
 from crafter_jepa.utils.rollout_buffer import RolloutBuffer
-from crafter_jepa.utils.visualization import save_rollout_gif, save_rollout_grid
 
 OBS_SHAPE = (3, 64, 64)
 
@@ -41,68 +39,6 @@ def real_next_obs(
     for i in np.flatnonzero(done):
         next_obs[i] = info["final_obs"][i]
     return to_tensor(next_obs, device)
-
-
-@torch.no_grad()
-def evaluate_rollout(
-    env_fn: Any,
-    encoder: ImpalaEncoder,
-    actor_critic: ActorCritic,
-    model: ObservationPredictor,
-    horizon: int,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, list[float]]:
-    """Runs one episode in a single env and compares ground truth with imagined rollout."""
-    encoder.eval()
-    actor_critic.eval()
-    model.eval()
-
-    eval_env = env_fn()
-    obs_np, _ = eval_env.reset()
-
-    gt_frames: list[torch.Tensor] = []
-    actions: list[int] = []
-
-    obs_t = to_tensor(obs_np[None], device).float() / 255
-    gt_frames.append(obs_t[0])
-
-    curr_obs_np = obs_np
-    for _ in range(horizon):
-        curr_t = to_tensor(curr_obs_np[None], device).float() / 255
-        feat = encoder(curr_t)
-        action, _, _, _ = actor_critic.get_action_and_value(feat)
-        act_int = int(action.item())
-        actions.append(act_int)
-
-        curr_obs_np, _, done, truncated, info = eval_env.step(act_int)
-        if done or truncated:
-            actual_next = info["final_obs"]
-        else:
-            actual_next = curr_obs_np
-
-        gt_frames.append(to_tensor(actual_next[None], device).float()[0] / 255)
-        if done or truncated:
-            break
-
-    eval_env.close()
-
-    actual_horizon = len(actions)
-    if actual_horizon == 0:
-        return torch.empty(0), torch.empty(0), []
-
-    initial_obs = gt_frames[0].unsqueeze(0)
-    actions_t = torch.tensor([actions], dtype=torch.long, device=device)
-
-    _, pred_obs = model.rollout(initial_obs, actions_t, encoder)
-
-    gt_tensor = torch.stack(gt_frames[1:], dim=0)
-    pred_tensor = pred_obs[0]
-
-    step_mses = [
-        float(F.mse_loss(pred_tensor[t], gt_tensor[t]).item())
-        for t in range(actual_horizon)
-    ]
-    return gt_tensor, pred_tensor, step_mses
 
 
 def main() -> None:
@@ -150,10 +86,6 @@ def main() -> None:
     pred_obs_loss_coef = float(train_cfg.get("pred_obs_loss_coef", 1.0))
     save_every = train_cfg.get("save_every", 25)
 
-    eval_cfg = dict(cfg.get("evaluation", {}))
-    visualize_every = eval_cfg.get("visualize_every", 25)
-    visualize_horizon = eval_cfg.get("visualize_horizon", 8)
-
     print(f"Loaded config from {config_path}")
     print(f"Loading policy checkpoint from {ckpt_path}...")
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
@@ -176,6 +108,9 @@ def main() -> None:
     if "vae_decoder" in ckpt:
         print("Warm-starting decoder weights from checkpoint.")
         model.decoder.load_state_dict(ckpt["vae_decoder"])
+    elif "sae_decoder" in ckpt:
+        print("Warm-starting decoder weights from SAE checkpoint.")
+        model.decoder.load_state_dict(ckpt["sae_decoder"])
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     buffer = RolloutBuffer(n_steps, n_envs, OBS_SHAPE, device)
@@ -220,6 +155,7 @@ def main() -> None:
                     )
                     obs = next_obs_np
 
+            # Training epochs over buffer
             epoch_stats: defaultdict[str, list[float]] = defaultdict(list)
             for _ in range(epochs):
                 for batch in buffer.minibatches(batch_size):
@@ -250,33 +186,7 @@ def main() -> None:
                 f"latent_loss: {mean_stats['loss/latent']:.4f}"
             )
 
-            if iteration % visualize_every == 0 or iteration == n_iterations:
-                from crafter_jepa.envs.crafter_env import CrafterGymEnv
-
-                gt_rollout, pred_rollout, step_mses = evaluate_rollout(
-                    lambda: CrafterGymEnv(seed + 1000, **env_cfg),
-                    encoder,
-                    actor_critic,
-                    model,
-                    visualize_horizon,
-                    device,
-                )
-                if len(step_mses) > 0:
-                    mse_str = ", ".join(
-                        f"t+{t + 1}: {m:.4f}" for t, m in enumerate(step_mses)
-                    )
-                    print(f"  Multi-step rollout MSE: [{mse_str}]")
-
-                    grid_path = out_dir / f"rollout_iter_{iteration:04d}.png"
-                    save_rollout_grid(gt_rollout, pred_rollout, grid_path)
-                    save_rollout_grid(
-                        gt_rollout, pred_rollout, out_dir / "latest_rollout.png"
-                    )
-                    save_rollout_gif(
-                        gt_rollout, pred_rollout, out_dir / "latest_rollout.gif"
-                    )
-                    print(f"  Visual rollout saved to {grid_path}")
-
+            # Checkpointing
             if iteration % save_every == 0 or iteration == n_iterations:
                 save_path = out_dir / "predictor_decoder.pt"
                 torch.save(

@@ -6,6 +6,26 @@ import numpy as np
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode, VectorEnv
 
 N_ACTIONS = 17
+LABEL_NAMES = (
+    "health",
+    "food",
+    "drink",
+    "energy",
+    "sapling",
+    "wood",
+    "stone",
+    "coal",
+    "iron",
+    "diamond",
+    "wood_pickaxe",
+    "stone_pickaxe",
+    "iron_pickaxe",
+    "wood_sword",
+    "stone_sword",
+    "iron_sword",
+    "daylight",
+)
+MAX_INVENTORY = 9.0
 OBS_SHAPE_HWC = (64, 64, 3)
 
 
@@ -16,17 +36,24 @@ class CrafterGymEnv(gym.Env[np.ndarray, int]):
     def __init__(self, seed: int, **crafter_kwargs: Any) -> None:
         self._env = crafter.Env(seed=seed, **crafter_kwargs)
 
+    def _labels(self, inventory: dict[str, int]) -> np.ndarray:
+        # probe targets for the current frame, scaled to [0, 1]
+        items = [inventory[name] / MAX_INVENTORY for name in LABEL_NAMES[:-1]]
+        return np.array([*items, self._env._world.daylight], dtype=np.float32)
+
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed)
-        return self._env.reset(), {}
+        obs = self._env.reset()
+        return obs, {"labels": self._labels(self._env._player.inventory)}
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         obs, reward, done, info = self._env.step(action)
         # crafter sets discount=0 only on death; time-limit ends keep discount=1
         terminated = done and info["discount"] == 0
         truncated = done and not terminated
+        info["labels"] = self._labels(info["inventory"])
         return obs, float(reward), terminated, truncated, info
 
 

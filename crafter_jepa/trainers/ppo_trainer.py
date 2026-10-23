@@ -7,7 +7,14 @@ import numpy as np
 import torch
 from gymnasium.vector import VectorEnv
 
+from crafter_jepa.envs.crafter_env import LABEL_NAMES
 from crafter_jepa.modules import ActorCritic, ImpalaEncoder
+from crafter_jepa.utils.diagnostics import (
+    OnlineProbe,
+    effective_rank,
+    explained_variance,
+    linear_cka,
+)
 from crafter_jepa.utils.logger import log_metrics
 from crafter_jepa.utils.rollout_buffer import RolloutBuffer
 from crafter_jepa.utils.schedule import LinearSchedule
@@ -39,6 +46,8 @@ class PPOTrainer:
         max_norm: float = 0.5,
         checkpoint_dir: str = "checkpoints",
         checkpoint_every: int = 50,
+        cka_lag: int = 10,
+        diag_frames: int = 1024,
     ) -> None:
         self.device = self._resolve_device(device)
         self.encoder = ImpalaEncoder(feature_dim).to(self.device)
@@ -58,7 +67,13 @@ class PPOTrainer:
         self.max_norm = max_norm
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_every = checkpoint_every
+        self.cka_lag = cka_lag
+        self.diag_frames = diag_frames
+        self.probe = OnlineProbe(feature_dim, len(LABEL_NAMES), self.device)
         self._episode_return = np.zeros(0)
+        self._labels = torch.zeros(0)
+        self._cka_frames: torch.Tensor | None = None
+        self._cka_prev: torch.Tensor | None = None
 
     @staticmethod
     def _resolve_device(name: str) -> torch.device:
@@ -156,7 +171,9 @@ class PPOTrainer:
                 value,
                 reward_t,
                 torch.as_tensor(done, dtype=torch.float32, device=self.device),
+                self._labels,
             )
+            self._labels = torch.as_tensor(info["labels"], device=self.device)
 
             self._episode_return += reward
             for i in np.flatnonzero(done):
@@ -188,6 +205,32 @@ class PPOTrainer:
             **{f"achievement/{name}": rate for name, rate in rates.items()},
             "crafter_score": math.exp(log_mean) - 1,
         }
+
+    def _diagnostics(self, buffer: RolloutBuffer, iteration: int) -> dict[str, float]:
+        self.encoder.eval()
+        total = buffer.n_steps * buffer.n_envs
+        idx = torch.randperm(total, device=self.device)[: self.diag_frames]
+        obs = buffer.obs.flatten(0, 1)[idx].float() / 255
+        labels = buffer.labels.flatten(0, 1)[idx]
+        with torch.no_grad():
+            features = self.encoder(obs)
+
+        metrics = {"diag/effective_rank": effective_rank(features)}
+        metrics.update(self.probe.fit_and_score(features, labels))
+        metrics.update(self._cka_metrics(obs, iteration))
+        return metrics
+
+    @torch.no_grad()
+    def _cka_metrics(self, obs: torch.Tensor, iteration: int) -> dict[str, float]:
+        if self._cka_frames is None:
+            self._cka_frames = obs
+        current = self.encoder(self._cka_frames)
+        metrics = {}
+        if self._cka_prev is not None:
+            metrics["diag/cka_prev"] = linear_cka(current, self._cka_prev)
+        if self._cka_prev is None or iteration % self.cka_lag == 0:
+            self._cka_prev = current
+        return metrics
 
     def _extra_loss(
         self, batch: dict[str, torch.Tensor], features: torch.Tensor
@@ -265,8 +308,11 @@ class PPOTrainer:
     def train(self, env: VectorEnv, n_envs: int) -> None:
         self._episode_return = np.zeros(n_envs)
         optimizer = torch.optim.AdamW(self._parameters(), lr=self.lr)
-        buffer = RolloutBuffer(self.n_steps, n_envs, OBS_SHAPE, self.device)
-        obs, _ = env.reset()
+        buffer = RolloutBuffer(
+            self.n_steps, n_envs, OBS_SHAPE, self.device, len(LABEL_NAMES)
+        )
+        obs, info = env.reset()
+        self._labels = torch.as_tensor(info["labels"], device=self.device)
 
         for iteration in range(1, self.n_iterations + 1):
             obs, last_value, episode_returns, achievements = self._collect_rollout(
@@ -282,9 +328,14 @@ class PPOTrainer:
                 self.lam,
             )
 
+            metrics: dict[str, float] = {
+                "explained_variance": explained_variance(buffer.values, buffer.returns)
+            }
+            metrics.update(self._diagnostics(buffer, iteration))
+
             env_steps = (iteration - 1) * self.n_steps * n_envs
             ent_coef = self.ent_schedule(env_steps)
-            metrics = self._update(buffer, optimizer, ent_coef)
+            metrics.update(self._update(buffer, optimizer, ent_coef))
             metrics["ent_coef"] = ent_coef
             if episode_returns:
                 metrics["episode_return"] = sum(episode_returns) / len(episode_returns)
