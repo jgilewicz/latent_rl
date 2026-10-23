@@ -9,7 +9,10 @@ wandb/
 checkpoints/
 *.pt
 *.egg-info/
+experiments/
 
 
 # md files
 todo.md
+# written by slurm/sync.sh
+CODE_VERSION

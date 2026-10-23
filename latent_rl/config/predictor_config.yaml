@@ -1,0 +1,24 @@
+env:
+  n_envs: 8
+  reward: true
+
+model:
+  feature_dim: 256
+  action_dim: 17
+  hidden_dim: 256
+
+training:
+  device: cuda
+  n_steps: 256
+  n_iterations: 100
+  batch_size: 256
+  epochs: 4
+  lr: 0.0005
+  latent_loss_coef: 1.0
+  recon_loss_coef: 1.0
+  pred_obs_loss_coef: 1.0
+  save_every: 25
+
+wandb:
+  entity: w1ndrunn3rr-wroc-aw-univeristy-of-science-and-technology
+  project: latent_rl
