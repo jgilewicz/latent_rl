@@ -10,6 +10,11 @@ sweep algo="ppo" seeds="0 1 2 3 4":
 train-predictor checkpoint seed="0":
     uv run python latent_rl/scripts/train_predictor.py --checkpoint {{trim_start_match(checkpoint, "checkpoint=")}} --seed {{trim_start_match(seed, "seed=")}}
 
+eval-buffer:
+    PYTHONPATH=. uv run python latent_rl/scripts/collect_eval_buffer.py
+
+compare:
+    PYTHONPATH=. uv run python latent_rl/scripts/compare_methods.py
 
 app:
     uv run python latent_rl/scripts/app.py

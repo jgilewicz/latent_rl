@@ -6,15 +6,17 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
 
 - `latent_rl/scripts/train_policy.py` — `--algo`, `--seed`, `--tag` (W&B experiment tag, default `dev`), `--n-iterations` (override, smoke tests) → `latent_rl/config/<algo>_config.yaml`; builds vec env, trainer; checkpoint dir gets `/seed<seed>`
 - `latent_rl/scripts/app.py` — launches Gradio visualizer
+- `latent_rl/scripts/compare_methods.py` — `just compare`; config `latent_rl/config/compare_config.yaml` (all constants + Polish plot text, no diacritics); W&B runs by tag → rliable Mean/IQM + P(X>Y) CIs + Welch → `plots/` (PNG+PDF, CSV); plotting in `latent_rl/utils/plotting.py`
+- `latent_rl/scripts/collect_eval_buffer.py` — `just eval-buffer`; config `latent_rl/config/eval_buffer_config.yaml` (5M checkpoint paths, `min_env_steps` guard, biome groups); one shared post-hoc dataset → `eval_buffer/buffer.npz` + `meta.json`; frames encoded by all 4 encoders (`z_<algo>`, `z_next_<algo>`); labels via `CrafterGymEnv.state()`
 - `latent_rl/scripts/train_predictor.py` — `--checkpoint <last.pt>`, `--seed`, `--tag`; trains `ObservationPredictor` on a frozen policy (visualization only, not a comparison metric); warm-starts from the checkpoint's predictor/decoder; writes `<ckpt dir>/predictor/seed<s>/predictor_decoder.pt` + W&B artifact `pred-<algo>-s<policy seed>:p<s>`
 - `latent_rl/config/` — `ppo_config.yaml`, `jepa_config.yaml`, `vae_config.yaml`, `sae_config.yaml`, `predictor_config.yaml`
-- `latent_rl/envs/crafter_env.py` — `CrafterGymEnv`, `make_vec_env`
+- `latent_rl/envs/crafter_env.py` — `CrafterGymEnv` (`state()`: full labels of the current frame), `make_vec_env`; `SEMANTIC_NAMES`, `VIEW_GRID` (9×7 world cells), `CELL_PX`
 - `latent_rl/modules/` — `ImpalaEncoder`, `ImpalaDecoder`, `ActorCritic`, `JEPA`, `VAE`, `SAE`, `ObservationPredictor`
 - `latent_rl/trainers/ppo_trainer.py` — `PPOTrainer` (hooks `_extra_loss`, `_after_step`)
 - `latent_rl/trainers/jepa_trainer.py` — `JEPATrainer(PPOTrainer)`; config `latent_rl/config/jepa_config.yaml` (`jepa_coef`, `ema_tau`, `var_coef`)
 - `latent_rl/trainers/vae_trainer.py` — `VAETrainer(PPOTrainer)`; config `latent_rl/config/vae_config.yaml` (`recon_coef`, `kl_coef`)
 - `latent_rl/trainers/sae_trainer.py` — `SAETrainer(PPOTrainer)`; config `latent_rl/config/sae_config.yaml` (`recon_coef`, `sparsity_coef`, `sparsity_target`)
-- `latent_rl/utils/` — `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay), `diagnostics.py` (`OnlineProbe`, `effective_rank`, `linear_cka`, `explained_variance`)
+- `latent_rl/utils/` — `resolve_device`, `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay), `diagnostics.py` (`OnlineProbe`, `effective_rank`, `linear_cka`, `explained_variance`)
 
 ## Latent diagnostics (training-time)
 
@@ -28,6 +30,7 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
 
 - PyTorch, class-based; no tests (user decision)
 - Checks: `just check` (ruff + ty)
+- `pandas==2.3.3` pinned: rliable caps `arch<8`, and arch 7 fails to import on pandas 3
 - Scripts using `AsyncVectorEnv` need an `if __name__ == "__main__":` guard (spawn) and `PYTHONPATH=.`
 
 ## Vectorization
@@ -68,6 +71,6 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
 - `slurm/sync.sh` rsyncs the working tree to `wcss:~/latent_rl` (no git on the cluster) and writes `CODE_VERSION`
 - `slurm/env.sh` (sourced): venv, uv cache, managed Python, checkpoints, logs all in `/lustre/pd03/<account>/latent_rl/` ($HOME is near quota); cwd = that dir
 - `slurm/setup.sbatch` — `uv sync --frozen` into the PD venv; rerun after dependency changes
-- `slurm/train.sbatch` — array 0-11: task i → `ALGOS[i/3]`, seed `i%3`; env `TAG`, `N_ITER`
+- `slurm/train.sbatch` — array 0-19: task i → `ALGOS[i/5]`, seed `i%5` (main-5m: 0-2 first, then 3,4,8,9,13,14,18,19); env `TAG`, `N_ITER`
 - `slurm/predictor.sbatch <last.pt>` — array 0-2 = predictor seeds
 - Experiment spec + record: `experiments/<name>/` (wcss-experiment skill)

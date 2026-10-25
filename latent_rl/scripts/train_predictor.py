@@ -11,6 +11,7 @@ from gymnasium.vector import VectorEnv
 
 from latent_rl.envs.crafter_env import make_vec_env
 from latent_rl.modules import ActorCritic, ImpalaEncoder, ObservationPredictor
+from latent_rl.utils.device import resolve_device
 from latent_rl.utils.logger import (
     LOGGER_NAME,
     finish_wandb,
@@ -50,17 +51,6 @@ def parse_args() -> argparse.Namespace:
         help="W&B experiment tag, e.g. predictor-5m",
     )
     return parser.parse_args()
-
-
-def resolve_device(name: str) -> torch.device:
-    if name not in ("cpu", "cuda"):
-        raise ValueError(f"device must be 'cpu' or 'cuda', got {name!r}")
-    if name == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError(
-            "device 'cuda' requested but CUDA is unavailable; "
-            "set training.device: cpu in the config"
-        )
-    return torch.device(name)
 
 
 def load_policy_checkpoint(path: Path, device: torch.device) -> dict[str, Any]:
@@ -192,7 +182,7 @@ def main() -> None:
     args = parse_args()
     cfg = load_config(args.config)
     train_cfg = cfg["training"]
-    device = resolve_device(train_cfg["device"])
+    device = resolve_device(train_cfg["device"], "training.device")
     torch.manual_seed(args.seed)
 
     ckpt = load_policy_checkpoint(args.checkpoint, device)

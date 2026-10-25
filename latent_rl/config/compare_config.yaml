@@ -1,0 +1,61 @@
+wandb:
+  entity: w1ndrunn3rr-wroc-aw-univeristy-of-science-and-technology
+  project: latent_rl
+  tag: main-5m
+
+out_dir: plots
+
+algos:
+  ppo: {label: PPO, color: "#2a78d6"}
+  jepa: {label: JEPA, color: "#eb6834"}
+  vae: {label: VAE, color: "#1baf7a"}
+  sae: {label: SAE, color: "#eda100"}
+
+window: 250000
+budgets: [1000000, 5000000]
+
+bootstrap:
+  reps: 50000
+  curve_reps: 5000
+  seed: 0
+
+aggregate_metrics: {Mean: Srednia, IQM: IQM}
+measures:
+  crafter_score: {title: Wynik Crafter, axis: "Wynik Crafter [%]"}
+  episode_return: {title: Zwrot z epizodu, axis: Zwrot z epizodu}
+
+diagnostics:
+  diag/effective_rank: {title: Efektywny rzad}
+  probe/r2: {title: "R² sondy liniowej (ekwipunek + pora dnia)", ylim: [0, 1]}
+  diag/cka_prev: {title: CKA wzgledem wczesniejszego stanu}
+  explained_variance: {title: Wariancja wyjasniona przez krytyka}
+
+text:
+  steps: Kroki srodowiska [mln]
+  curve_note: IQM po ziarnach, 95% przedzial ufnosci (bootstrap)
+  poi: P(X > Y), 95% przedzial ufnosci (bootstrap)
+  success: Skutecznosc [%] (skala log.)
+
+achievements:
+  collect_coal: zbierz wegiel
+  collect_diamond: zbierz diament
+  collect_drink: napij sie
+  collect_iron: zbierz zelazo
+  collect_sapling: zbierz sadzonke
+  collect_stone: zbierz kamien
+  collect_wood: zbierz drewno
+  defeat_skeleton: pokonaj szkieleta
+  defeat_zombie: pokonaj zombie
+  eat_cow: zjedz krowe
+  eat_plant: zjedz rosline
+  make_iron_pickaxe: zrob zelazny kilof
+  make_iron_sword: zrob zelazny miecz
+  make_stone_pickaxe: zrob kamienny kilof
+  make_stone_sword: zrob kamienny miecz
+  make_wood_pickaxe: zrob drewniany kilof
+  make_wood_sword: zrob drewniany miecz
+  place_furnace: postaw piec
+  place_plant: posadz rosline
+  place_stone: postaw kamien
+  place_table: postaw stol
+  wake_up: obudz sie

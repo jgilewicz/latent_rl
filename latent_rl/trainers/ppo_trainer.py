@@ -9,6 +9,7 @@ from gymnasium.vector import VectorEnv
 
 from latent_rl.envs.crafter_env import LABEL_NAMES
 from latent_rl.modules import ActorCritic, ImpalaEncoder
+from latent_rl.utils.device import resolve_device
 from latent_rl.utils.diagnostics import (
     OnlineProbe,
     effective_rank,
@@ -52,7 +53,7 @@ class PPOTrainer:
         artifact_name: str,
         checkpoint_meta: dict[str, Any],
     ) -> None:
-        self.device = self._resolve_device(device)
+        self.device = resolve_device(device, "trainer.device")
         self.encoder = ImpalaEncoder(feature_dim).to(self.device)
         self.actor_critic = ActorCritic(
             feature_dim, action_dim, hidden_dim, dropout
@@ -79,17 +80,6 @@ class PPOTrainer:
         self._labels = torch.zeros(0)
         self._cka_frames: torch.Tensor | None = None
         self._cka_prev: torch.Tensor | None = None
-
-    @staticmethod
-    def _resolve_device(name: str) -> torch.device:
-        if name not in ("cpu", "cuda"):
-            raise ValueError(f"device must be 'cpu' or 'cuda', got {name!r}")
-        if name == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError(
-                "device 'cuda' requested but CUDA is unavailable; "
-                "set trainer.device: cpu in the config"
-            )
-        return torch.device(name)
 
     def _to_tensor(self, obs: np.ndarray) -> torch.Tensor:
         pixels = torch.as_tensor(obs, device=self.device)

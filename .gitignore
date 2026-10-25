@@ -10,9 +10,12 @@ checkpoints/
 *.pt
 *.egg-info/
 experiments/
-
+plots/
+eval_buffer/
+*.pdf
 
 # md files
 todo.md
+notes.md
 # written by slurm/sync.sh
 CODE_VERSION
