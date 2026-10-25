@@ -13,6 +13,9 @@ train-predictor checkpoint seed="0":
 eval-buffer:
     PYTHONPATH=. uv run python latent_rl/scripts/collect_eval_buffer.py
 
+latent-comparison:
+    PYTHONPATH=. uv run python latent_rl/scripts/latent_comparison.py
+
 compare:
     PYTHONPATH=. uv run python latent_rl/scripts/compare_methods.py
 

@@ -1,9 +1,13 @@
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
+from matplotlib.collections import PathCollection
+from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
 
 INK = "#0b0b0b"
@@ -232,4 +236,156 @@ def achievements(
     ax.grid(axis="y", visible=False)
     ax.set_xlabel(xlabel)
     ax.legend(loc="lower right", ncols=len(algos), bbox_to_anchor=(1, 1))
+    return fig
+
+
+def _pair_matrix(table: pd.DataFrame, algos: list[str], column: str) -> np.ndarray:
+    matrix = table.pivot(index="x", columns="y", values=column)
+    return matrix.reindex(index=algos, columns=algos).fillna(1.0).to_numpy()
+
+
+def cka_matrix(table: pd.DataFrame, algos: Algos, text: dict[str, str]) -> Figure:
+    mean, low, high = (
+        _pair_matrix(table, list(algos), column)
+        for column in ("mean", "ci_low", "ci_high")
+    )
+    labels = [style["label"] for style in algos.values()]
+    fig, ax = plt.subplots(figsize=(5.2, 4.4))
+    image = ax.imshow(mean, cmap="Blues", vmin=0, vmax=1)
+    for i, j in np.ndindex(mean.shape):
+        # dark cells need light ink to keep the value readable
+        color = SURFACE if mean[i, j] > 0.6 else INK
+        ax.text(
+            j,
+            i - 0.1,
+            f"{mean[i, j]:.2f}",
+            ha="center",
+            va="center",
+            color=color,
+            fontsize=11,
+            fontweight="bold",
+        )
+        if i != j:
+            ax.text(
+                j,
+                i + 0.22,
+                f"[{low[i, j]:.2f}, {high[i, j]:.2f}]",
+                ha="center",
+                va="center",
+                color=color,
+                fontsize=7,
+            )
+    ax.set_xticks(range(len(labels)), labels)
+    ax.set_yticks(range(len(labels)), labels)
+    ax.tick_params(length=0)
+    ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.set_title(text["cka_title"])
+    ax.set_xlabel(text["bootstrap_note"], color=INK_MUTED, size=8)
+    colorbar = fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+    colorbar.outline.set_visible(False)
+    colorbar.set_label(text["cka_axis"])
+    return fig
+
+
+def metric_intervals(
+    table: pd.DataFrame, algos: Algos, metrics: dict[str, dict[str, str]], note: str
+) -> Figure:
+    n_cols = min(len(metrics), 2)
+    n_rows = -(-len(metrics) // n_cols)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(3.4 * n_cols, n_rows * (0.45 * len(algos) + 1.2) + 0.4),
+        squeeze=False,
+    )
+    for i, (ax, (metric, style)) in enumerate(
+        zip(axes.flat, metrics.items(), strict=True)
+    ):
+        rows = table[table["metric"] == metric].set_index("algo")
+        rows = rows.loc[list(algos)].reset_index()
+        _interval_panel(ax, rows.assign(point=rows["mean"]), algos)
+        ax.set_title(style["title"], size=10)
+        ax.set_xlabel(style["axis"], size=9)
+        first_col = i % n_cols == 0
+        labels = [algos[a]["label"] for a in rows["algo"]][::-1] if first_col else []
+        ax.set_yticks(range(len(rows)) if first_col else [], labels)
+    fig.supxlabel(note, color=INK_MUTED, size=8)
+    fig.tight_layout()
+    return fig
+
+
+def _bare(ax: Axes) -> None:
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def _umap_classes(
+    ax: Axes, xy: np.ndarray, codes: np.ndarray, classes: dict[str, dict[str, str]]
+) -> None:
+    # common classes first so rare ones (cave: ~2% of frames) stay visible
+    for code in np.argsort(np.bincount(codes, minlength=len(classes)))[::-1]:
+        style = list(classes.values())[code]
+        mask = codes == code
+        ax.scatter(*xy[mask].T, color=style["color"], s=1, lw=0, rasterized=True)
+
+
+def umap_grid(
+    embeddings: dict[str, np.ndarray],
+    colorings: dict[str, np.ndarray],
+    algos: Algos,
+    panels: dict[str, dict[str, Any]],
+    title: str,
+) -> Figure:
+    fig, axes = plt.subplots(
+        len(algos),
+        len(panels),
+        figsize=(3.2 * len(panels), 2.9 * len(algos) + 1),
+        squeeze=False,
+        layout="constrained",
+    )
+    # rows are sorted by episode; shuffle so no single episode paints on top
+    n_frames = len(next(iter(colorings.values())))
+    order = np.random.default_rng(0).permutation(n_frames)
+    mappables: dict[str, PathCollection] = {}
+    for row, (algo, style) in enumerate(algos.items()):
+        for col, (key, panel) in enumerate(panels.items()):
+            ax, xy = axes[row, col], embeddings[algo]
+            if "classes" in panel:
+                _umap_classes(ax, xy, colorings[key], panel["classes"])
+            else:
+                # the lightest steps vanish against the surface
+                cmap = plt.get_cmap(panel["cmap"])(np.linspace(0.2, 1, 256))
+                mappables[key] = ax.scatter(
+                    *xy[order].T,
+                    c=colorings[key][order],
+                    cmap=ListedColormap(cmap),
+                    s=1,
+                    lw=0,
+                    rasterized=True,
+                )
+            _bare(ax)
+            if row == 0:
+                ax.set_title(panel["title"])
+        axes[row, 0].set_ylabel(style["label"], color=INK, size=11, weight="bold")
+    for col, (key, panel) in enumerate(panels.items()):
+        if "classes" in panel:
+            handles = [
+                Line2D([], [], ls="", marker="o", color=c["color"], label=c["label"])
+                for c in panel["classes"].values()
+            ]
+            axes[-1, col].legend(
+                handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0), ncols=2
+            )
+        else:
+            colorbar = fig.colorbar(
+                mappables[key], ax=axes[-1, col], orientation="horizontal", shrink=0.8
+            )
+            colorbar.outline.set_visible(False)
+            colorbar.set_label(panel["axis"], size=9)
+    fig.suptitle(title, x=0.02, ha="left", weight="bold")
     return fig

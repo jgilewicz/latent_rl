@@ -20,6 +20,7 @@ just train-predictor checkpoints/jepa/seed0/last.pt 0  # policy ckpt, predictor 
 just app                 # Gradio visualizer
 just compare             # rliable stats + plots → plots/
 just eval-buffer         # frozen 5M policies → eval_buffer/ (post-hoc data)
+just latent-comparison   # CKA, TwoNN, eff. rank, UMAP, temporal from eval_buffer/ → plots/
 just check               # ruff + ty
 ```
 
@@ -50,13 +51,40 @@ Config: `latent_rl/config/<algo>_config.yaml` (~5M env steps per run; identical 
 - Per frame: `obs`, `next_obs` (true successor), `action`, `reward`, `terminated`, `truncated`, `source` (policy index), `env`, `episode`, `t`
 - Labels of `obs`: `inventory` (raw counts, incl. vitals), `achievements` (unlocked so far), `daylight`, `sleeping`, `semantic` (9×7 visible cells, [row, col] = frame layout), `player_pos`, `biome`
 - Sorted by (`episode`, `t`): episodes are contiguous; `meta.json` holds names, sources, field shapes
+- Load with `EvalBuffer(Path("eval_buffer"))` (`latent_rl/utils/eval_buffer.py`): lazy per-field access, `latents(algo, next_step)`, `resample_episodes(rng)` (episode bootstrap, stratified by policy)
+
+## Latent-space comparison (post-hoc)
+
+- `just latent-comparison` → `plots/` (config `latent_rl/config/latent_comparison_config.yaml`)
+- All metrics on all buffer frames; plotted value = mean of an episode bootstrap (1000 reps), 95% CI; CSV also has `full` (full-sample estimate)
+- Linear CKA between the 4 encoders → `cka_matrix.{png,pdf}`, `cka.csv`
+- TwoNN intrinsic dimension (Facco et al. 2017) + effective rank → `dimensions.{png,pdf}`, `dimensions.csv`
+- UMAP of every encoder (all frames, fixed seed, PCA init), coloured by daylight, biome, achievements unlocked so far → `umap.{png,pdf}`
+- Temporal → `temporal.{png,pdf}`, `temporal.csv`:
+  - `latent_step`: mean ‖z_{t+1} − z_t‖ / mean distance to a random frame (lower = smoother)
+  - `step_correlation`: Spearman between latent step and pixel step
+  - `r2_next`, `r2_delta`: linear regression [z_t, one-hot a_t] → z_{t+1}, fit once, scored on held-out episodes (every `holdout_every`-th); R² of z_{t+1} and of the change z_{t+1} − z_t
+- TwoNN uses a Theiler window (`theiler_window`, 50 steps): same-episode neighbours closer in time are skipped, else it measures the 1-D trajectory (ID ~1.5); duplicate latents dropped
+- Code: `latent_rl/analysis/` (one module per metric group); the script only loads the config, runs them and writes CSV + plots
+- Runtime ~4-5 min on a local CPU; mostly the 1000-rep bootstraps, UMAP ~10 s per encoder
 
 ## Layout
 
-- `latent_rl/scripts/`: `train_policy.py`, `train_predictor.py`, `app.py`
+- `latent_rl/scripts/`: entry points
+  - training: `train_policy.py`, `train_predictor.py`
+  - post-hoc: `collect_eval_buffer.py`, `compare_methods.py`, `latent_comparison.py`
+  - UI: `app.py`
 - `latent_rl/trainers/`: `PPOTrainer` + one subclass per algo
 - `latent_rl/modules/`: encoder, decoder, actor-critic, JEPA, VAE, SAE
-- `latent_rl/utils/diagnostics.py`: latent metrics
+- `latent_rl/analysis/`: post-hoc latent metrics on the eval buffer
+  - `bootstrap.py`: episode bootstrap, metric tables
+  - `similarity.py` (CKA), `dimensions.py` (TwoNN, effective rank)
+  - `temporal.py` (smoothness, linear predictability), `embedding.py` (UMAP)
+- `latent_rl/utils/`:
+  - `diagnostics.py`: metric primitives (training-time + post-hoc)
+  - `eval_buffer.py`: `EvalBuffer` loader
+  - `plotting.py`: all comparison figures
+- `latent_rl/config/`: one YAML per algo + `compare`, `eval_buffer`, `latent_comparison`, `predictor`
 - Checkpoints: `checkpoints/<algo>/seed<seed>/last.pt` (+ `1M/last.pt`)
 - `slurm/`: WCSS job scripts, see below
 

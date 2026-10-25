@@ -1,0 +1,55 @@
+buffer_dir: eval_buffer
+out_dir: plots
+
+algos:
+  ppo: {label: PPO, color: "#2a78d6"}
+  jepa: {label: JEPA, color: "#eb6834"}
+  vae: {label: VAE, color: "#1baf7a"}
+  sae: {label: SAE, color: "#eda100"}
+
+bootstrap:
+  reps: 1000
+  seed: 0
+
+# TwoNN skips neighbours from the same episode closer than this many steps;
+# the estimate plateaus from ~50 (1: ~1.5, 10: ~14, 50 and whole episode: ~19)
+theiler_window: 50
+
+umap:
+  n_neighbors: 15
+  min_dist: 0.1
+  # spectral init fails on near-duplicate frames (too small an eigengap)
+  init: pca
+  # a fixed seed requires a single thread (~20 s per encoder on 40k frames)
+  random_state: 0
+  n_jobs: 1
+
+umap_panels:
+  daylight: {title: Pora dnia, cmap: cividis, axis: "jasnosc (0 noc, 1 dzien)"}
+  biome:
+    title: Biom
+    classes:
+      grassland: {label: laka, color: "#1baf7a"}
+      water: {label: woda, color: "#2a78d6"}
+      mountain: {label: gory, color: "#c4701c"}
+      cave: {label: jaskinia, color: "#8e4fd0"}
+  achievements: {title: Osiagniecia, cmap: Purples, axis: liczba odblokowanych osiagniec}
+
+# every n-th episode is held out to score the linear dynamics model
+holdout_every: 5
+
+temporal:
+  latent_step: {title: "Krok latentu ‖z(t+1) − z(t)‖", axis: "wzgledem losowej pary klatek"}
+  step_correlation: {title: Zgodnosc ze zmiana obrazu, axis: "korelacja Spearmana z krokiem pikseli"}
+  r2_next: {title: "Przewidywalnosc z(t+1) z (z(t), a(t))", axis: "R² (regresja liniowa)"}
+  r2_delta: {title: "Przewidywalnosc zmiany z(t+1) − z(t)", axis: "R² (regresja liniowa)"}
+
+dimensions:
+  two_nn: {title: Wymiar wewnetrzny (TwoNN), axis: wymiar}
+  effective_rank: {title: Efektywny rzad, axis: "efektywny rzad (z 256)"}
+
+text:
+  cka_title: Liniowe CKA miedzy enkoderami
+  cka_axis: CKA
+  umap_title: UMAP przestrzeni latentnych (wszystkie klatki bufora)
+  bootstrap_note: "srednia z bootstrapu po epizodach, 95% przedzial ufnosci"

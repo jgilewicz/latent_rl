@@ -8,15 +8,32 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
 - `latent_rl/scripts/app.py` — launches Gradio visualizer
 - `latent_rl/scripts/compare_methods.py` — `just compare`; config `latent_rl/config/compare_config.yaml` (all constants + Polish plot text, no diacritics); W&B runs by tag → rliable Mean/IQM + P(X>Y) CIs + Welch → `plots/` (PNG+PDF, CSV); plotting in `latent_rl/utils/plotting.py`
 - `latent_rl/scripts/collect_eval_buffer.py` — `just eval-buffer`; config `latent_rl/config/eval_buffer_config.yaml` (5M checkpoint paths, `min_env_steps` guard, biome groups); one shared post-hoc dataset → `eval_buffer/buffer.npz` + `meta.json`; frames encoded by all 4 encoders (`z_<algo>`, `z_next_<algo>`); labels via `CrafterGymEnv.state()`
+- `latent_rl/scripts/latent_comparison.py` — `just latent-comparison`; config `latent_rl/config/latent_comparison_config.yaml`; thin orchestration only (config, `check_algos`, CSV + plots via `write_intervals`); metrics live in `latent_rl/analysis/`
+- `latent_rl/analysis/` — post-hoc metrics on `EvalBuffer`, plain functions grouped by metric family:
+  - `bootstrap.py` — `Statistic` (row indices → one value per algo), `bootstrap` (episode resampling, same seed for every metric), `summarize` (full, mean, 95% CI), `metric_table` (long table algo × metric)
+  - `similarity.py` — `cka` → 4×4 linear CKA (`plots/cka_matrix.*`, `cka.csv`)
+  - `dimensions.py` — `two_nn_ratios` (dedupe, Theiler window), `dimensions` → TwoNN + effective rank (`plots/dimensions.*`)
+  - `temporal.py` — `temporal` → `latent_step`, `step_correlation`, `r2_next`, `r2_delta` (lstsq fit once on non-held-out episodes, scored on held-out rows of each resample) (`plots/temporal.*`)
+  - `embedding.py` — `umap_embeddings` (`umap:` params), `umap_colorings` (biome classes must match `meta.json` order) (`plots/umap.*`)
+  - new metric = function returning `metric_table(...)` + a panel entry in the config section named like the CSV
 - `latent_rl/scripts/train_predictor.py` — `--checkpoint <last.pt>`, `--seed`, `--tag`; trains `ObservationPredictor` on a frozen policy (visualization only, not a comparison metric); warm-starts from the checkpoint's predictor/decoder; writes `<ckpt dir>/predictor/seed<s>/predictor_decoder.pt` + W&B artifact `pred-<algo>-s<policy seed>:p<s>`
-- `latent_rl/config/` — `ppo_config.yaml`, `jepa_config.yaml`, `vae_config.yaml`, `sae_config.yaml`, `predictor_config.yaml`
+- `latent_rl/config/` — `ppo_config.yaml`, `jepa_config.yaml`, `vae_config.yaml`, `sae_config.yaml`, `predictor_config.yaml`, `compare_config.yaml`, `eval_buffer_config.yaml`, `latent_comparison_config.yaml`
 - `latent_rl/envs/crafter_env.py` — `CrafterGymEnv` (`state()`: full labels of the current frame), `make_vec_env`; `SEMANTIC_NAMES`, `VIEW_GRID` (9×7 world cells), `CELL_PX`
 - `latent_rl/modules/` — `ImpalaEncoder`, `ImpalaDecoder`, `ActorCritic`, `JEPA`, `VAE`, `SAE`, `ObservationPredictor`
 - `latent_rl/trainers/ppo_trainer.py` — `PPOTrainer` (hooks `_extra_loss`, `_after_step`)
 - `latent_rl/trainers/jepa_trainer.py` — `JEPATrainer(PPOTrainer)`; config `latent_rl/config/jepa_config.yaml` (`jepa_coef`, `ema_tau`, `var_coef`)
 - `latent_rl/trainers/vae_trainer.py` — `VAETrainer(PPOTrainer)`; config `latent_rl/config/vae_config.yaml` (`recon_coef`, `kl_coef`)
 - `latent_rl/trainers/sae_trainer.py` — `SAETrainer(PPOTrainer)`; config `latent_rl/config/sae_config.yaml` (`recon_coef`, `sparsity_coef`, `sparsity_target`)
-- `latent_rl/utils/` — `resolve_device`, `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay), `diagnostics.py` (`OnlineProbe`, `effective_rank`, `linear_cka`, `explained_variance`)
+- `latent_rl/utils/` — `resolve_device`, `EvalBuffer` (post-hoc loader: lazy cached fields, `latents`, `resample_episodes`), `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay), `diagnostics.py` (`OnlineProbe`, `effective_rank`, `linear_cka`, `linear_cka_matrix`, `nn_distance_ratios`, `two_nn_dimension`, `explained_variance`), `plotting.py` (`compare_methods` figures + `cka_matrix`, `metric_intervals`, `umap_grid`)
+
+## Post-hoc latent comparison
+
+- Only 1 seed per algo in the buffer → uncertainty = episode bootstrap (stratified by `source`), not across seeds
+- Plotted value = bootstrap mean; `full` column = full-sample estimate (effective rank mean sits slightly below `full`: duplicated episodes)
+- `effective_rank` uses `eigvalsh` of the Gram in float64 (≈10× faster than `svdvals`, same values) — keep float64
+- TwoNN: float64 distances (float32 gives r1 = 0) + Theiler window 50 (without it ID ≈ 1.5 = trajectory); plateau from ~10 up to whole episode
+- UMAP: `init: pca` (spectral init fails on small eigengap); `n_jobs: 1` explicit (else warning with `random_state`)
+- `umap-learn==0.5.12` pulls scikit-learn, pynndescent
 
 ## Latent diagnostics (training-time)
 
@@ -63,7 +80,7 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
 
 ## Device
 
-- `trainer.device` ∈ {`cpu`, `cuda`}; validated in `PPOTrainer._resolve_device`
+- `trainer.device` ∈ {`cpu`, `cuda`}; validated by `latent_rl.utils.device.resolve_device`
 
 ## WCSS (SLURM)
 
