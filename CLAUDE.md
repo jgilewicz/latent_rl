@@ -16,15 +16,25 @@ Project: latent-rl — PPO on Crafter; encoder ablation (PPO vs JEPA vs VAE vs S
   - `temporal.py` — `temporal` → `latent_step`, `step_correlation`, `r2_next`, `r2_delta` (lstsq fit once on non-held-out episodes, scored on held-out rows of each resample) (`plots/temporal.*`)
   - `embedding.py` — `umap_embeddings` (`umap:` params), `umap_colorings` (biome classes must match `meta.json` order) (`plots/umap.*`)
   - new metric = function returning `metric_table(...)` + a panel entry in the config section named like the CSV
+- `latent_rl/scripts/xai_analysis.py` — `just xai`; config `latent_rl/config/xai_config.yaml`; orchestration only, reuses `check_algos`, `load_config`, `write_intervals` from `latent_comparison.py`
+- `latent_rl/scripts/occlusion_analysis.py` — `just occlusion`; same config (section `occlusion`, panels `occlusion_maps`); separate script so the probes (~2 min) don't rerun
+- `latent_rl/scripts/ablation_analysis.py` — `just ablation`; same config (section `ablation`, panels `ablation_kl`)
+- `latent_rl/xai/` — post-hoc XAI on `EvalBuffer`:
+  - `probe.py` — `player_state` (inventory columns by name), `fit_probe` (scaler + `clone(model)`, fit on train episodes), `probe_errors` (squared error for every row), `r2_statistic` (R² on held-out rows of a resample), `frame_types` (k-means on 16×16 frames), `control_targets` (one random label row per type), `selectivity` (real − control clipped at 0), `probe` → `metric_table` with metrics `<probe>_<target>`, `<probe>_control_<target>`, `<probe>_selectivity_<target>`
+  - script splits the table: selectivity → `plots/probe_selectivity.*`, the rest → `plots/probe_r2.*`
+  - plot panels in config sections `probe_r2`, `probe_selectivity` (not `probes`: `write_intervals` reads `cfg[name]` as panels)
+  - control R² of MLP is often < 0 (overfits train episodes) → clipped in selectivity; 250 types: ~94% of test frames have a type seen in training
+  - `occlusion.py` — `load_policies` (checkpoints from `buffer.meta["sources"]`, fails if re-encoding doesn't reproduce `z_<algo>`), `mean_frame`, `occlude`, `occlusion_maps` (‖Δz‖, |Δŷ| per cell), `summarize_maps` (frame means, Δz / RMS spread of z), `occlusion` → `{algo: {map: [9, 9]}}`; plot `plotting.occlusion_grid`
+  - occlusion `GRID = (9, 9)`: 7 world rows + 2 HUD rows; HUD cells are fixed per item (row 7: health, food, drink, energy, sapling, wood, stone, coal, iron; row 8: diamond, pickaxes, swords) → vitals probes read their own HUD icon
 - `latent_rl/scripts/train_predictor.py` — `--checkpoint <last.pt>`, `--seed`, `--tag`; trains `ObservationPredictor` on a frozen policy (visualization only, not a comparison metric); warm-starts from the checkpoint's predictor/decoder; writes `<ckpt dir>/predictor/seed<s>/predictor_decoder.pt` + W&B artifact `pred-<algo>-s<policy seed>:p<s>`
-- `latent_rl/config/` — `ppo_config.yaml`, `jepa_config.yaml`, `vae_config.yaml`, `sae_config.yaml`, `predictor_config.yaml`, `compare_config.yaml`, `eval_buffer_config.yaml`, `latent_comparison_config.yaml`
+- `latent_rl/config/` — `ppo_config.yaml`, `jepa_config.yaml`, `vae_config.yaml`, `sae_config.yaml`, `predictor_config.yaml`, `compare_config.yaml`, `eval_buffer_config.yaml`, `latent_comparison_config.yaml`, `xai_config.yaml`
 - `latent_rl/envs/crafter_env.py` — `CrafterGymEnv` (`state()`: full labels of the current frame), `make_vec_env`; `SEMANTIC_NAMES`, `VIEW_GRID` (9×7 world cells), `CELL_PX`
 - `latent_rl/modules/` — `ImpalaEncoder`, `ImpalaDecoder`, `ActorCritic`, `JEPA`, `VAE`, `SAE`, `ObservationPredictor`
 - `latent_rl/trainers/ppo_trainer.py` — `PPOTrainer` (hooks `_extra_loss`, `_after_step`)
 - `latent_rl/trainers/jepa_trainer.py` — `JEPATrainer(PPOTrainer)`; config `latent_rl/config/jepa_config.yaml` (`jepa_coef`, `ema_tau`, `var_coef`)
 - `latent_rl/trainers/vae_trainer.py` — `VAETrainer(PPOTrainer)`; config `latent_rl/config/vae_config.yaml` (`recon_coef`, `kl_coef`)
 - `latent_rl/trainers/sae_trainer.py` — `SAETrainer(PPOTrainer)`; config `latent_rl/config/sae_config.yaml` (`recon_coef`, `sparsity_coef`, `sparsity_target`)
-- `latent_rl/utils/` — `resolve_device`, `EvalBuffer` (post-hoc loader: lazy cached fields, `latents`, `resample_episodes`), `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay), `diagnostics.py` (`OnlineProbe`, `effective_rank`, `linear_cka`, `linear_cka_matrix`, `nn_distance_ratios`, `two_nn_dimension`, `explained_variance`), `plotting.py` (`compare_methods` figures + `cka_matrix`, `metric_intervals`, `umap_grid`)
+- `latent_rl/utils/` — `resolve_device`, `EvalBuffer` (post-hoc loader: lazy cached fields, `latents`, `resample_episodes`), `RolloutBuffer`, `log_metrics`, `LinearSchedule` (entropy-coef decay), `diagnostics.py` (`OnlineProbe`, `effective_rank`, `linear_cka`, `linear_cka_matrix`, `nn_distance_ratios`, `two_nn_dimension`, `explained_variance`), `plotting.py` (`compare_methods` figures + `cka_matrix`, `metric_intervals` (hides unused panels of the 2-column grid), `umap_grid`, `occlusion_grid`)
 
 ## Post-hoc latent comparison
 

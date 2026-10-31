@@ -300,8 +300,10 @@ def metric_intervals(
         figsize=(3.4 * n_cols, n_rows * (0.45 * len(algos) + 1.2) + 0.4),
         squeeze=False,
     )
+    for ax in axes.flat[len(metrics) :]:
+        ax.set_visible(False)
     for i, (ax, (metric, style)) in enumerate(
-        zip(axes.flat, metrics.items(), strict=True)
+        zip(axes.flat[: len(metrics)], metrics.items(), strict=True)
     ):
         rows = table[table["metric"] == metric].set_index("algo")
         rows = rows.loc[list(algos)].reset_index()
@@ -387,5 +389,40 @@ def umap_grid(
             )
             colorbar.outline.set_visible(False)
             colorbar.set_label(panel["axis"], size=9)
+    fig.suptitle(title, x=0.02, ha="left", weight="bold")
+    return fig
+
+
+def occlusion_grid(
+    maps: dict[str, dict[str, np.ndarray]],
+    algos: Algos,
+    panels: dict[str, dict[str, str]],
+    title: str,
+) -> Figure:
+    fig, axes = plt.subplots(
+        len(algos),
+        len(panels),
+        figsize=(2.6 * len(panels), 2.5 * len(algos) + 1),
+        squeeze=False,
+        layout="constrained",
+    )
+    for col, (key, panel) in enumerate(panels.items()):
+        # one scale per column so encoders are compared on the same colors
+        vmax = max(float(maps[algo][key].max()) for algo in algos)
+        for row, (algo, style) in enumerate(algos.items()):
+            ax = axes[row, col]
+            image = ax.imshow(maps[algo][key], cmap="Blues", vmin=0, vmax=vmax)
+            # world (7 rows) above, inventory HUD (2 rows) below
+            ax.axhline(6.5, color=INK_MUTED, lw=0.8, ls="--")
+            _bare(ax)
+            if row == 0:
+                ax.set_title(panel["title"], size=10)
+            if col == 0:
+                ax.set_ylabel(style["label"], color=INK, size=11, weight="bold")
+        colorbar = fig.colorbar(
+            image, ax=axes[-1, col], orientation="horizontal", shrink=0.8
+        )
+        colorbar.outline.set_visible(False)
+        colorbar.set_label(panel["axis"], size=9)
     fig.suptitle(title, x=0.02, ha="left", weight="bold")
     return fig

@@ -13,6 +13,7 @@ dependencies = [
     "pandas==2.3.3",
     "pyyaml==6.0.3",
     "rliable>=1.2.0",
+    "scikit-learn==1.9.1",
     "scipy==1.18.1",
     "torch>=2.14.1",
     "umap-learn==0.5.12",
