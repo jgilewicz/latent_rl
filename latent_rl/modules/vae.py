@@ -84,15 +84,3 @@ class VAE(nn.Module):
         recon_loss = F.mse_loss(recon, obs)
         kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
         return recon_loss, kl_loss, recon
-
-    def reconstruct(self, obs: torch.Tensor) -> torch.Tensor:
-        mu, _ = self.encode(obs)
-        return self.decode(mu)
-
-    def sample(
-        self, num_samples: int, device: torch.device | None = None
-    ) -> torch.Tensor:
-        if device is None:
-            device = next(self.parameters()).device
-        z = torch.randn(num_samples, self.latent_dim, device=device)
-        return self.decode(z)

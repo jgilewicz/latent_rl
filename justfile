@@ -35,6 +35,3 @@ check:
     uv run ruff format --check .
     uv run ruff check .
     uv run ty check latent_rl
-
-test:
-    uv run pytest -q
