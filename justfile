@@ -16,6 +16,15 @@ eval-buffer:
 latent-comparison:
     PYTHONPATH=. uv run python latent_rl/scripts/latent_comparison.py
 
+xai:
+    PYTHONPATH=. uv run python latent_rl/scripts/xai_analysis.py
+
+occlusion:
+    PYTHONPATH=. uv run python latent_rl/scripts/occlusion_analysis.py
+
+ablation:
+    PYTHONPATH=. uv run python latent_rl/scripts/ablation_analysis.py
+
 compare:
     PYTHONPATH=. uv run python latent_rl/scripts/compare_methods.py
 
@@ -26,6 +35,3 @@ check:
     uv run ruff format --check .
     uv run ruff check .
     uv run ty check latent_rl
-
-test:
-    uv run pytest -q

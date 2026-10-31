@@ -41,35 +41,6 @@ class ObservationPredictor(nn.Module):
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         return self.decoder(latent)
 
-    def predict_latent(
-        self, latent: torch.Tensor, action: torch.Tensor
-    ) -> torch.Tensor:
-        if action.ndim == 1:
-            action_one_hot = F.one_hot(action, self.action_dim).float()
-        else:
-            action_one_hot = action.float()
-        return self.predictor(latent, action_one_hot)
-
-    @torch.no_grad()
-    def rollout(
-        self,
-        initial_obs: torch.Tensor,
-        actions: torch.Tensor,
-        encoder: nn.Module,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        B, H = actions.shape
-        predicted_latents: list[torch.Tensor] = []
-        predicted_obs: list[torch.Tensor] = []
-
-        current_latent = encoder(initial_obs)
-
-        for t in range(H):
-            current_latent, next_o = self(current_latent, actions[:, t])
-            predicted_latents.append(current_latent)
-            predicted_obs.append(next_o)
-
-        return torch.stack(predicted_latents, dim=1), torch.stack(predicted_obs, dim=1)
-
     def loss(
         self,
         obs: torch.Tensor,

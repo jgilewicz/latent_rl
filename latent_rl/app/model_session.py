@@ -97,8 +97,13 @@ class ModelSession:
                 if "predictor" in ckpt and self.predictor_model is not None:
                     self.predictor_model.predictor.load_state_dict(ckpt["predictor"])
 
-            pred_ckpt_path = p.parent / "predictor" / "predictor_decoder.pt"
-            if pred_ckpt_path.is_file():
+            # train_predictor.py writes predictor/seed<s>/; a W&B artifact
+            # downloaded by hand lands directly in predictor/
+            pred_ckpts = sorted(
+                (p.parent / "predictor").glob("**/predictor_decoder.pt")
+            )
+            if pred_ckpts:
+                pred_ckpt_path = pred_ckpts[0]
                 pred_ckpt = torch.load(
                     pred_ckpt_path, map_location=self.device, weights_only=False
                 )

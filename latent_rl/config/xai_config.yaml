@@ -1,0 +1,93 @@
+buffer_dir: eval_buffer
+out_dir: plots
+
+algos:
+  ppo: {label: PPO, color: "#2a78d6"}
+  jepa: {label: JEPA, color: "#eb6834"}
+  vae: {label: VAE, color: "#1baf7a"}
+  sae: {label: SAE, color: "#eda100"}
+
+bootstrap:
+  reps: 1000
+  seed: 0
+
+probes:
+  targets: [health, food, drink, energy]
+  # every n-th episode is held out to score the probes
+  holdout_every: 5
+  ridge:
+    alpha: 0.05
+  mlp:
+    hidden_layer_sizes: [256]
+    early_stopping: true
+    max_iter: 200
+    random_state: 0
+  # control task (Hewitt & Liang): k-means frame types with random labels;
+  # 250 types: ~94% of test frames have a type also seen in training
+  control:
+    kmeans:
+      n_clusters: 250
+      random_state: 0
+      n_init: 3
+    seed: 0
+
+# one cell of the 9x9 frame grid (7 world rows + 2 HUD rows) at a time
+# replaced by the mean frame; linear probe from `probes`
+occlusion:
+  device: cpu
+  n_frames: 500
+  seed: 0
+  batch: 512
+
+# mean-ablation of z subspaces (all buffer frames): KL(π ‖ π_abl);
+# z has no privileged basis (Linear -> LayerNorm), so subspaces, not dims
+ablation:
+  device: cpu
+  batch: 4096
+  seed: 0
+  # 256 = all of z -> KL(π(z) ‖ π(z̄)), the upper bound
+  pca_dims: [1, 4, 16, 64, 256]
+
+# panel per metric `<probe>_<target>`, in plotting order
+probe_r2:
+  linear_health: {title: "Zdrowie, sonda liniowa", axis: "R² (epizody testowe)"}
+  mlp_health: {title: "Zdrowie, sonda MLP", axis: "R² (epizody testowe)"}
+  linear_food: {title: "Jedzenie, sonda liniowa", axis: "R² (epizody testowe)"}
+  mlp_food: {title: "Jedzenie, sonda MLP", axis: "R² (epizody testowe)"}
+  linear_drink: {title: "Picie, sonda liniowa", axis: "R² (epizody testowe)"}
+  mlp_drink: {title: "Picie, sonda MLP", axis: "R² (epizody testowe)"}
+  linear_energy: {title: "Energia, sonda liniowa", axis: "R² (epizody testowe)"}
+  mlp_energy: {title: "Energia, sonda MLP", axis: "R² (epizody testowe)"}
+
+# selectivity (Hewitt & Liang): real-task R² minus control-task R² clipped at 0
+probe_selectivity:
+  linear_selectivity_health: {title: "Zdrowie, sonda liniowa", axis: "R² − max(R² kontrolne, 0)"}
+  mlp_selectivity_health: {title: "Zdrowie, sonda MLP", axis: "R² − max(R² kontrolne, 0)"}
+  linear_selectivity_food: {title: "Jedzenie, sonda liniowa", axis: "R² − max(R² kontrolne, 0)"}
+  mlp_selectivity_food: {title: "Jedzenie, sonda MLP", axis: "R² − max(R² kontrolne, 0)"}
+  linear_selectivity_drink: {title: "Picie, sonda liniowa", axis: "R² − max(R² kontrolne, 0)"}
+  mlp_selectivity_drink: {title: "Picie, sonda MLP", axis: "R² − max(R² kontrolne, 0)"}
+  linear_selectivity_energy: {title: "Energia, sonda liniowa", axis: "R² − max(R² kontrolne, 0)"}
+  mlp_selectivity_energy: {title: "Energia, sonda MLP", axis: "R² − max(R² kontrolne, 0)"}
+
+# panel per ablated subspace `kl_<subspace>`, in plotting order
+ablation_kl:
+  kl_vitals: {title: "Kierunki sondy vitali (4)", axis: "KL(π ‖ π_abl) [nat]"}
+  kl_random: {title: "Losowe kierunki (4)", axis: "KL(π ‖ π_abl) [nat]"}
+  kl_pca_1: {title: "Top 1 kierunek PCA", axis: "KL(π ‖ π_abl) [nat]"}
+  kl_pca_4: {title: "Top 4 kierunki PCA", axis: "KL(π ‖ π_abl) [nat]"}
+  kl_pca_16: {title: "Top 16 kierunkow PCA", axis: "KL(π ‖ π_abl) [nat]"}
+  kl_pca_64: {title: "Top 64 kierunki PCA", axis: "KL(π ‖ π_abl) [nat]"}
+  kl_pca_256: {title: "Cale z (z → srednia)", axis: "KL(π ‖ π_abl) [nat]"}
+
+# occlusion heatmap columns: `latent` = relative ‖Δz‖, then probe targets
+occlusion_maps:
+  latent: {title: "Latent", axis: "‖Δz‖ / rozrzut z"}
+  health: {title: "Sonda: zdrowie", axis: "|Δŷ| (jednostki ekwipunku)"}
+  food: {title: "Sonda: jedzenie", axis: "|Δŷ| (jednostki ekwipunku)"}
+  drink: {title: "Sonda: picie", axis: "|Δŷ| (jednostki ekwipunku)"}
+  energy: {title: "Sonda: energia", axis: "|Δŷ| (jednostki ekwipunku)"}
+
+text:
+  bootstrap_note: "srednia z bootstrapu po epizodach, 95% przedzial ufnosci"
+  occlusion_title: "Okluzja pol siatki: srednia z klatek testowych (linia = granica HUD)"
